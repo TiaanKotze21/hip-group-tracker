@@ -1,5 +1,3 @@
-var CACHE = 'hip-v1';
-
 self.addEventListener('install', function(e) {
   self.skipWaiting();
 });
@@ -15,7 +13,6 @@ self.addEventListener('message', function(e) {
   setTimeout(function() {
     self.registration.showNotification('HIP Group', {
       body: body,
-      icon: '/hip-group-tracker/icon.svg',
       tag: 'hip-daily',
       renotify: true,
       requireInteraction: false
@@ -25,5 +22,5 @@ self.addEventListener('message', function(e) {
 
 self.addEventListener('notificationclick', function(e) {
   e.notification.close();
-  e.waitUntil(clients.openWindow('/hip-group-tracker/'));
+  e.waitUntil(clients.openWindow(self.registration.scope));
 });
