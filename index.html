@@ -265,6 +265,20 @@ select.inp{cursor:pointer;-webkit-appearance:none}
   </div>
   <div class="swrap"><div class="spgs" id="spgs">
     <div class="spg" id="pg-today">
+      <!-- Date navigator -->
+      <div id="date-nav" style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:10px 14px;background:var(--s2);border:1px solid var(--bd);border-radius:var(--r2);">
+        <button onclick="A.shiftDate(-1)" style="width:34px;height:34px;background:var(--s3);border:1px solid var(--bd);border-radius:8px;color:var(--txt);font-size:16px;cursor:pointer;font-family:var(--ff);flex-shrink:0;">&#8592;</button>
+        <div style="flex:1;text-align:center;">
+          <div id="date-nav-lbl" style="font-size:14px;font-weight:800;"></div>
+          <div id="date-nav-sub" style="font-size:11px;color:var(--txt3);margin-top:1px;"></div>
+        </div>
+        <button id="date-nav-fwd" onclick="A.shiftDate(1)" style="width:34px;height:34px;background:var(--s3);border:1px solid var(--bd);border-radius:8px;color:var(--txt);font-size:16px;cursor:pointer;font-family:var(--ff);flex-shrink:0;">&#8594;</button>
+      </div>
+      <!-- Backlog banner (shown when editing a past date) -->
+      <div id="backlog-banner" style="display:none;background:rgba(245,200,66,.08);border:1px solid rgba(245,200,66,.3);border-radius:var(--r2);padding:10px 14px;margin-bottom:10px;font-size:12px;color:var(--gold);font-weight:700;">
+        &#128197; Editing a past entry — data saves to the selected date, not today.
+        <span onclick="A.goToToday()" style="margin-left:8px;text-decoration:underline;cursor:pointer;color:var(--txt2);font-weight:600;">Back to today</span>
+      </div>
       <div class="mgrid" id="today-grid"></div>
       <div style="margin-top:16px;"><div class="sec">7-Day Streak</div><div class="sbar" id="streak-bar"></div></div>
       <div style="margin-top:18px;"><div class="sec">Achievements</div><div class="alist" id="ach-list"></div></div>
@@ -466,6 +480,7 @@ var me=null,profiles={},allData={},follows={},requests={},connections={},crmData
 var prevScr=null,pinBuf="",pinUID="",selAv="&#128142;",sAv="&#128142;";
 var curTab=0,pTab="all",pSearch="",crmSearch="",charts={},fbReady=false,sharePeriod="weekly";
 var picDataUrl="";
+var curDateKey=""; // tracks which date the Today tab is showing — defaults to today()
 
 function dk(d){d=d||new Date();var y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),day=String(d.getDate()).padStart(2,"0");return y+m+day;}
 function today(){return dk();}
@@ -833,7 +848,7 @@ renderGoalEd:function(){if(isAdmin())return;var g=myGoals();document.getElementB
 saveGoals:function(){var g={};METRICS.forEach(function(m){g[m.key]={qty:parseInt(document.getElementById("gq-"+m.key).value)||1,period:document.getElementById("gp-"+m.key).value||"daily"};});fbUpd("hip_v1/profiles/"+me.id,{goals:g}).then(function(){me.goals=g;renderMain();renderBN();alert("Goals saved!");});},
 inc:function(key){
   if(!me)return;
-  var k=today();
+  var k=curDateKey||today();
   R("hip_v1/data/"+me.id+"/"+k).once("value").then(function(snap){
     var e=snap.exists()?snap.val():{CONV:0,MPA:0,DTM:0,MG1:0};
     var nv=(e[key]||0)+1;
@@ -848,14 +863,36 @@ inc:function(key){
 },
 dec:function(key){
   if(!me)return;
-  var k=today();
+  var k=curDateKey||today();
   R("hip_v1/data/"+me.id+"/"+k).once("value").then(function(snap){
     var e=snap.exists()?snap.val():{CONV:0,MPA:0,DTM:0,MG1:0};
     e[key]=Math.max(0,(e[key]||0)-1);
     fbSet("hip_v1/data/"+me.id+"/"+k,e);
   });
 },
-setTab:function(i,el){curTab=i;document.querySelectorAll(".tbar .tb").forEach(function(t,j){t.classList.toggle("on",j===i);});document.getElementById("spgs").style.transform="translateX(-"+i*100+"%)";renderMain();renderBN();},
+setTab:function(i,el){
+  curTab=i;
+  document.querySelectorAll(".tbar .tb").forEach(function(t,j){t.classList.toggle("on",j===i);});
+  document.getElementById("spgs").style.transform="translateX(-"+i*100+"%)";
+  // Reset to today when switching back to Today tab
+  if(i===0){curDateKey=today();updateDateNav();}
+  renderMain();renderBN();
+},
+shiftDate:function(dir){
+  var d=new Date(curDateKey.slice(0,4)+"-"+curDateKey.slice(4,6)+"-"+curDateKey.slice(6,8)+"T00:00:00");
+  d.setDate(d.getDate()+dir);
+  var newKey=dk(d);
+  // Don't allow going forward past today
+  if(newKey>today())return;
+  curDateKey=newKey;
+  updateDateNav();
+  renderToday();renderBN();
+},
+goToToday:function(){
+  curDateKey=today();
+  updateDateNav();
+  renderToday();renderBN();
+},
 toggleNotif:function(){var p=profiles[me&&me.id]||{},on=p.notifOn===true;if(!on){if("Notification" in window){Notification.requestPermission().then(function(perm){if(perm==="granted"){fbUpd("hip_v1/profiles/"+me.id,{notifOn:true,notifTime:p.notifTime||"17:00"}).then(function(){scheduleNotif();loadNotif();});}else alert("Please allow notifications.");});}else alert("Notifications not supported.");}else{fbUpd("hip_v1/profiles/"+me.id,{notifOn:false}).then(function(){loadNotif();});}},
 saveNotifTime:function(v){fbUpd("hip_v1/profiles/"+me.id,{notifTime:v}).then(function(){scheduleNotif();});},
 openShare:function(){sharePeriod="weekly";document.querySelectorAll(".period-btn").forEach(function(b){b.classList.toggle("on",b.dataset.p==="weekly");});A._fillRange();document.getElementById("share-modal").classList.add("open");},
@@ -1048,6 +1085,11 @@ deleteCRM:function(){var id=document.getElementById("crm-edit-id").value;if(!id)
 addToProcess:function(id){fbUpd("hip_v1/crm/"+me.id+"/"+id,{stage:0,stageUpdated:Date.now()}).then(function(){alert("Contact added to process at Stage 1.");A.show("scr-crm");});},
 removeFromProcess:function(id){if(!confirm("Remove this contact from the process?"))return;R("hip_v1/crm/"+me.id+"/"+id+"/stage").set(null);R("hip_v1/crm/"+me.id+"/"+id+"/stageUpdated").set(null).then(function(){alert("Removed from process.");A.show("scr-crm");});},
 setStage:function(cid,stage){fbUpd("hip_v1/crm/"+me.id+"/"+cid,{stage:stage,stageUpdated:Date.now()});},
+selectStreakDay:function(dateKey){
+  curDateKey=dateKey;
+  updateDateNav();
+  renderToday();renderBN();
+},
 setPTab:function(t){pTab=t;["all","following","connected"].forEach(function(x){var b=document.getElementById("ptab-"+x);if(!b)return;var on=x===t;b.style.background=on?"var(--red)":"transparent";b.style.color=on?"#fff":"var(--txt2)";b.style.borderColor=on?"transparent":"var(--bd)";});renderPplList();},
 filterPeople:function(v){pSearch=v.toLowerCase();renderPplList();},
 hideCel:function(){document.getElementById("cel").style.display="none";}
@@ -1059,20 +1101,39 @@ function renderLogin(){var list=document.getElementById("login-list"),ps=Object.
 function afterLogin(){if(isAdmin()){document.getElementById("bnav").style.display="none";A.show("scr-admin");return;}document.getElementById("bnav").style.display="block";
 if(isMentor()&&!document.getElementById("ni-mentor")){var row=document.getElementById("nav-row"),ni=document.createElement("div");ni.className="ni";ni.id="ni-mentor";ni.innerHTML="<div class=\"ni-ico\">&#128101;</div><div class=\"ni-lbl\">Mentees</div>";ni.onclick=function(){A.nav("scr-mentor",ni);};row.insertBefore(ni,document.getElementById("ni-ppl"));}
 if(!document.getElementById("ni-process")){var row2=document.getElementById("nav-row"),ni2=document.createElement("div");ni2.className="ni";ni2.id="ni-process";ni2.innerHTML="<div class=\"ni-ico\">&#128260;</div><div class=\"ni-lbl\">Process</div>";ni2.onclick=function(){A.nav("scr-process",ni2);};row2.insertBefore(ni2,document.getElementById("ni-ppl"));}
-updateHeaderAv();document.getElementById("m-name").textContent=me.name;document.getElementById("m-date").textContent=new Date().toLocaleDateString("en-NZ",{weekday:"short",day:"numeric",month:"short",year:"numeric"});document.getElementById("quote-wrap").innerHTML=renderQuote();A.show("scr-main");renderMain();renderBN();updateBadge();scheduleNotif();}
+updateHeaderAv();document.getElementById("m-name").textContent=me.name;document.getElementById("m-date").textContent=new Date().toLocaleDateString("en-NZ",{weekday:"short",day:"numeric",month:"short",year:"numeric"});document.getElementById("quote-wrap").innerHTML=renderQuote();curDateKey=today();A.show("scr-main");renderMain();renderBN();updateBadge();scheduleNotif();updateDateNav();}
 
 function updateHeaderAv(){var p=profiles[me&&me.id]||me,el=document.getElementById("m-av");if(!el)return;if(p&&p.photo)el.innerHTML="<img src=\""+p.photo+"\" style=\"width:30px;height:30px;border-radius:50%;object-fit:cover;\">";else el.textContent=(p&&p.avatar)||"&#128142;";}
 function renderQuote(){var q=QUOTES[new Date().getDate()%QUOTES.length];return "<div class=\"qbanner\"><div class=\"qtxt\">\""+q.t+"\"</div><div class=\"qauth\">- "+q.a+"</div></div>";}
 function renderMain(){if(!me||isAdmin())return;if(curTab===0)renderToday();else if(curTab===1)renderWeek();else if(curTab===2)renderMonth();else renderYear();}
 
+function updateDateNav(){
+  var isToday=curDateKey===today();
+  var lbl=document.getElementById("date-nav-lbl");
+  var sub=document.getElementById("date-nav-sub");
+  var fwd=document.getElementById("date-nav-fwd");
+  var banner=document.getElementById("backlog-banner");
+  if(lbl)lbl.textContent=isToday?"Today":fmtK(curDateKey);
+  if(sub){if(isToday){sub.textContent=new Date().toLocaleDateString("en-NZ",{weekday:"long",day:"numeric",month:"long",year:"numeric"});}else{var msAgo=new Date()-new Date(curDateKey.slice(0,4)+"-"+curDateKey.slice(4,6)+"-"+curDateKey.slice(6,8)+"T00:00:00"),daysAgo=Math.round(msAgo/86400000);sub.textContent=daysAgo===1?"Yesterday":daysAgo+" days ago";}}
+  if(fwd){fwd.style.opacity=isToday?"0.2":"1";fwd.style.pointerEvents=isToday?"none":"auto";}
+  if(banner)banner.style.display=isToday?"none":"flex";
+}
+
 function renderToday(){
-  var k=today(),h=udata(me.id),e=(h&&h[k])||{CONV:0,MPA:0,DTM:0,MG1:0},g=myGoals(),bn=detectBN();
+  var k=curDateKey||today();
+  var isToday=k===today();
+  var h=udata(me.id),e=(h&&h[k])||{CONV:0,MPA:0,DTM:0,MG1:0},g=myGoals();
+  var bn=null;
+  if(isToday){bn=detectBN();}
+  else{var dayBNKey=detectBNForDay(e,g);if(dayBNKey){var bnM=METRICS.find(function(m){return m.key===dayBNKey;});bn={key:dayBNKey,m:bnM,p:pct(e[dayBNKey]||0,(g[dayBNKey]||{qty:1}).qty),msg:bnM.label+" was the bottleneck for this day."};}}
   document.getElementById("today-grid").innerHTML=METRICS.map(function(m){
-    var gl=g[m.key]||{qty:1,period:"daily"},pt=periodTotal(me.id,m.key,gl.period),tv=e[m.key]||0,p2=pct(pt,gl.qty),hit=pt>=gl.qty,ov=pt>gl.qty,isBN=bn&&bn.key===m.key;
-    return "<div class=\"mc"+(hit?" hit":"")+(ov?" over":"")+(isBN&&!hit?" bottleneck":"")+"\">"+(isBN&&!hit?"<div class=\"bn-badge\">BOTTLENECK</div>":"")+"<div class=\"mc-ico\">"+m.emoji+"</div><div class=\"mc-lbl\">"+m.label+"</div><div class=\"mc-val\" style=\"color:"+m.color+";\">"+pt+"</div><div class=\"mc-gl\">Goal: "+gl.qty+" "+gl.period+"</div><div class=\"mc-pct\" style=\"color:"+(ov?"var(--gold)":hit?"var(--green)":m.color)+";\">"+p2+"%"+(ov?" &#11088;":"")+"</div><div class=\"mc-bar\"><div class=\"mc-fill\" style=\"width:"+Math.min(100,p2)+"%;background:"+m.color+";\"></div></div><div class=\"mc-btns\"><button class=\"mc-plus\" onclick=\"A.inc('"+m.key+"')\">"+(hit?"&#10003;":"+")+"</button><button class=\"mc-min\" onclick=\"A.dec('"+m.key+"')\" "+(tv===0?"disabled":"")+">&#8722;</button></div></div>";
+    var gl=g[m.key]||{qty:1,period:"daily"};
+    var pt=isToday?periodTotal(me.id,m.key,gl.period):(e[m.key]||0);
+    var tv=e[m.key]||0,p2=pct(pt,gl.qty),hit=pt>=gl.qty,ov=pt>gl.qty,isBN=bn&&bn.key===m.key;
+    return "<div class=\"mc"+(hit?" hit":"")+(ov?" over":"")+(isBN&&!hit?" bottleneck":"")+"\">"+(isBN&&!hit?"<div class=\"bn-badge\">BOTTLENECK</div>":"")+"<div class=\"mc-ico\">"+m.emoji+"</div><div class=\"mc-lbl\">"+m.label+"</div><div class=\"mc-val\" style=\"color:"+m.color+";\">"+pt+"</div><div class=\"mc-gl\">Goal: "+gl.qty+" "+gl.period+"</div><div class=\"mc-pct\" style=\"color:"+(ov?"var(--gold)":hit?"var(--green)":m.color)+";\">"+ p2+"%"+(ov?" &#11088;":"")+"</div><div class=\"mc-bar\"><div class=\"mc-fill\" style=\"width:"+Math.min(100,p2)+"%;background:"+m.color+";\"></div></div><div class=\"mc-btns\"><button class=\"mc-plus\" onclick=\"A.inc('"+ m.key+"')\">"+(hit?"&#10003;":"+")+"</button><button class=\"mc-min\" onclick=\"A.dec('"+ m.key+"')\" "+(tv===0?"disabled":"")+">&#8722;</button></div></div>";
   }).join("");
   var days=last7();
-  document.getElementById("streak-bar").innerHTML=days.map(function(d2){var de=(h&&h[d2])||{},isT=d2===today(),anyH=METRICS.some(function(m){var gl=g[m.key]||{qty:1,period:"daily"};return gl.period==="daily"&&(de[m.key]||0)>=gl.qty;}),anyA=METRICS.some(function(m){return (de[m.key]||0)>0;});return "<div class=\"sd"+(anyH?" hit":anyA?" part":"")+(isT?" tod":"")+"\" title=\""+fmtK(d2)+"\"></div>";}).join("");
+  document.getElementById("streak-bar").innerHTML=days.map(function(d2){var de=(h&&h[d2])||{},isT=d2===today(),isSel=d2===k&&!isToday,anyH=METRICS.some(function(m){var gl=g[m.key]||{qty:1,period:"daily"};return gl.period==="daily"&&(de[m.key]||0)>=gl.qty;}),anyA=METRICS.some(function(m){return (de[m.key]||0)>0;});return "<div class=\"sd"+(anyH?" hit":anyA?" part":"")+(isT?" tod":"")+"\" title=\""+fmtK(d2)+"\" style=\"cursor:pointer;"+(isSel?"border:2px solid var(--gold);":"")+"\" onclick=\"A.selectStreakDay('"+ d2+"')\"></div>";}).join("");
   document.getElementById("ach-list").innerHTML=ACHS.map(function(a){var on=a.fn(h||{},g);return "<div class=\"aitem"+(on?" on":"")+"\" ><div class=\"a-ico\">"+a.ico+"</div><div class=\"a-name\">"+a.name+"</div><div class=\"a-desc\">"+a.desc+"</div></div>";}).join("");
 }
 
@@ -1167,7 +1228,9 @@ function buildPad(id,mode){var keys=["1","2","3","4","5","6","7","8","9","","0",
 function dotsFill(id,n){var el=document.getElementById(id);if(!el)return;el.querySelectorAll(".pd").forEach(function(d,i){d.classList.toggle("on",i<n);});}
 document.getElementById("av-picker").addEventListener("click",function(e){var t=e.target.closest(".av-opt");if(!t)return;document.querySelectorAll("#av-picker .av-opt").forEach(function(a){a.classList.remove("sel");});t.classList.add("sel");selAv=t.dataset.v;});
 document.getElementById("s-av-picker").addEventListener("click",function(e){var t=e.target.closest(".av-opt");if(!t)return;document.querySelectorAll("#s-av-picker .av-opt").forEach(function(a){a.classList.remove("sel");});t.classList.add("sel");sAv=t.dataset.v;});
-document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible"&&me&&!isAdmin()){document.getElementById("m-date").textContent=new Date().toLocaleDateString("en-NZ",{weekday:"short",day:"numeric",month:"short",year:"numeric"});document.getElementById("quote-wrap").innerHTML=renderQuote();if(curTab===0)renderToday();renderBN();}});
+document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible"&&me&&!isAdmin()){// If the date has changed (past midnight), reset to today
+if(curDateKey&&curDateKey!==today()){/* keep selected date */}
+document.getElementById("m-date").textContent=new Date().toLocaleDateString("en-NZ",{weekday:"short",day:"numeric",month:"short",year:"numeric"});document.getElementById("quote-wrap").innerHTML=renderQuote();if(curTab===0){if(!curDateKey)curDateKey=today();updateDateNav();renderToday();}renderBN();}});
 
 </script>
 <script>
