@@ -715,7 +715,7 @@ function scheduleNotif(){
   if(notifTO)clearTimeout(notifTO);
   var p=profiles[me&&me.id]||{};
   if(!p.notifOn)return;
-  if(Notification.permission!=="granted")return;
+  if(!window.Notification||Notification.permission!=="granted")return;
 
   var parts=(p.notifTime||"17:00").split(":"),h=parseInt(parts[0]),min=parseInt(parts[1]);
   var now=new Date();
@@ -723,22 +723,29 @@ function scheduleNotif(){
   if(target<=now)target.setDate(target.getDate()+1);
   var delayMs=target-now;
 
-  // Use service worker if available — fires even when app is in background
-  if(window._swReg&&window._swReg.active){
-    window._swReg.active.postMessage({
-      type:"SCHEDULE_NOTIF",
-      delayMs:delayMs,
-      title:"HIP Group &#128142;",
-      body:"Reminder: Complete your tracker for today!"
+  // Send to service worker for background delivery
+  function sendToSW(){
+    if(window._swReg&&window._swReg.active){
+      window._swReg.active.postMessage({
+        type:"SCHEDULE_NOTIF",
+        delayMs:delayMs,
+        body:"Reminder: Complete your tracker for today!"
+      });
+    }
+  }
+
+  if(window._swReady){
+    sendToSW();
+  } else if("serviceWorker" in navigator){
+    navigator.serviceWorker.ready.then(function(reg){
+      window._swReg=reg;window._swReady=true;
+      sendToSW();
     });
   }
 
-  // Always also set a setTimeout as fallback (works when tab is active)
+  // setTimeout fallback — works when tab is open/active
   notifTO=setTimeout(function(){
-    if(window.Notification&&Notification.permission==="granted"){
-      new Notification("HIP Group",{body:"Reminder: Complete your tracker for today!"});
-    }
-    // Reschedule for next day
+    new Notification("HIP Group",{body:"Reminder: Complete your tracker for today!"});
     notifTO=null;
     scheduleNotif();
   },delayMs);
@@ -1165,44 +1172,26 @@ document.addEventListener("visibilitychange",function(){if(document.visibilitySt
 </script>
 <script>
 // ── SERVICE WORKER FOR BACKGROUND NOTIFICATIONS ───────────────────────────────
-// Only register on https (Netlify), not on file://
 if("serviceWorker" in navigator && location.protocol === "https:") {
-  // SW code written with no arrow functions, no template literals, no backticks
-  // to avoid any strict-mode or syntax issues
-  var swCode = [
-    "var CACHE = 'hip-v1';",
-    "self.addEventListener('install', function(e) { self.skipWaiting(); });",
-    "self.addEventListener('activate', function(e) { self.clients.claim(); });",
-    // Handle message from main page to schedule a notification
-    "self.addEventListener('message', function(e) {",
-    "  if (!e.data || e.data.type !== 'SCHEDULE_NOTIF') return;",
-    "  var delayMs = e.data.delayMs;",
-    "  var title = e.data.title || 'HIP Group';",
-    "  var body = e.data.body || 'Reminder: Complete your tracker for today!';",
-    "  setTimeout(function() {",
-    "    self.registration.showNotification(title, {",
-    "      body: body,",
-    "      icon: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Ctext y=%2252%22 font-size=%2252%22%3E%F0%9F%92%8E%3C/text%3E%3C/svg%3E',",
-    "      badge: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Ctext y=%2252%22 font-size=%2252%22%3E%F0%9F%92%8E%3C/text%3E%3C/svg%3E',",
-    "      tag: 'hip-daily',",
-    "      renotify: true",
-    "    });",
-    "  }, delayMs);",
-    "});",
-    "self.addEventListener('notificationclick', function(e) {",
-    "  e.notification.close();",
-    "  e.waitUntil(clients.openWindow('/'));",
-    "});"
-  ].join("\n");
-
-  var swBlob = new Blob([swCode], {type: "application/javascript"});
-  var swUrl = URL.createObjectURL(swBlob);
-
-  navigator.serviceWorker.register(swUrl).then(function(reg) {
-    console.log("HIP SW registered");
+  navigator.serviceWorker.register("./sw.js").then(function(reg) {
     window._swReg = reg;
+    // If SW is already active use it, otherwise wait for it
+    if(reg.active) {
+      window._swReady = true;
+    }
+    reg.addEventListener("updatefound", function() {
+      var newWorker = reg.installing;
+      newWorker.addEventListener("statechange", function() {
+        if(newWorker.state === "activated") {
+          window._swReady = true;
+        }
+      });
+    });
+    navigator.serviceWorker.ready.then(function() {
+      window._swReady = true;
+    });
   }).catch(function(err) {
-    console.log("SW registration failed:", err);
+    console.log("SW failed:", err);
   });
 }
 </script>
